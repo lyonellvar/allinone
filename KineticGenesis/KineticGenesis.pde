@@ -62,12 +62,9 @@ long sketchSeed = 0;
 // ---------------------------------------------------------------------------
 // SETUP / DRAW
 // ---------------------------------------------------------------------------
-void settings() {
+void setup() {
   size(CANVAS, CANVAS, P2D);
   smooth(4);
-}
-
-void setup() {
   frameRate(FR);
   sketchSeed = (long)random(1, 999999);
   randomSeed(sketchSeed);
