@@ -4,6 +4,14 @@
  *
  * - Sincronía Absoluta: Un único Reloj Maestro rige todo el sistema cinético y tipográfico.
  * - Estética de Museo: Capas perfectamente jerarquizadas, opacidades risográficas y fluidez magnética.
+ * - Composición Áurea: cada mutación ancla su campo de ondas y sus órbitas
+ *   secundarias en uno de los 4 cruces de proporción áurea del lienzo (no
+ *   en el centro exacto), con una única pieza ancla de mayor escala en ese
+ *   punto y un margen consistente en todas las capas — asimetría deliberada
+ *   en vez de simetría radial tipo mandala.
+ * - Paleta Coherente: los acentos (formas Hilma, glifos) se derivan de la
+ *   paleta armónica activa más un único acento "chispa" por mutación, en
+ *   vez de mezclar paletas ajenas sin relación entre sí.
  * - Controles:
  * [1 / Q] : Nueva mutación armónica perfecta
  * [2]     : Ciclar paletas maestras de color
@@ -44,24 +52,22 @@ color[][] PAIRS = new color[][]{
   { rgb(103, 58, 183), rgb(255, 182, 193) }
 };
 
+// Reserva de "chispas" de acento: un único color de este set se elige UNA
+// vez por mutación (ver buildAccentPalette) y se repite en toda la pieza,
+// en vez de usarse disperso al azar — así el acento nunca choca con la
+// paleta armónica activa.
 color[] HACC = new color[]{
   rgb(46, 63, 147), rgb(255, 201, 20), rgb(225, 42, 42),
   rgb(40, 157, 77), rgb(103, 58, 183), rgb(255, 182, 193),
   rgb(255, 140, 0), rgb(255, 215, 0), rgb(192, 192, 192)
 };
 
-color[] vibrantPalette = {
-  #ff5ec4, #14a6ff, #e8441f, #ff6a00, #f7a000, #f4cd00,
-  #15ad03, #1b82e6, #6d5acf, #c1292e, #f1d302, #1A53C0,
-  #da4167, #FBAF00, #00AF54, #f71735, #067bc2, #FF006E,
-  #8338EC, #3A86FF, #00E5FF, #76FF03, #F72585, #4CC9F0
-};
-
-color[] coreColors = {
-  #c1292e, #f1d302, #1A53C0, #da4167, #FBAF00,
-  #00AF54, #f71735, #067bc2, #FFC247, #FF006E,
-  #8338EC, #06D6A0, #E12A2A, #3A86FF
-};
+// Paleta de acentos activa: se reconstruye en cada mutación a partir de
+// `pal` + un único spark de HACC, para que las formas Hilma y los glifos
+// CSym respiren el mismo acorde cromático que el resto de la obra. El
+// valor de aquí abajo es solo el default de arranque antes de la primera
+// composeAPEX().
+color[] accentPal = HACC.clone();
 
 color[] pal;
 int palIdx = 0;
@@ -110,6 +116,14 @@ boolean showKM = true;
 boolean showMS = true;
 boolean showBR = true;
 
+// Punto focal compositivo: uno de los 4 cruces de la proporción áurea,
+// recalculado en cada mutación (ver composeAPEX). Reemplaza el centro
+// geométrico exacto como origen del campo de ondas y de las órbitas
+// secundarias, rompiendo la simetría radial tipo "mandala" por una
+// composición asimétrica con un punto de fuerza claro.
+PVector focal = new PVector();
+float focalMaxDist = 0;
+
 final int A_SOLID = 175;
 final int A_TEXT  = 150;
 
@@ -157,10 +171,10 @@ float gSpd = 1.6;
 
 // ==================== ONDA ESPACIAL SINCRONIZADA ====================
 void ondaEspacial(float x, float y, float t, float[] outScale, PVector outOffset) {
-  float cx = x - width/2;
-  float cy = y - height/2;
+  float cx = x - focal.x;
+  float cy = y - focal.y;
   float dist = sqrt(cx*cx + cy*cy);
-  float maxDist = sqrt(sq(width/2) + sq(height/2));
+  float maxDist = focalMaxDist;
   float normDist = constrain(dist / maxDist, 0, 1);
 
   float dMouse = dist(x, y, mouseX, mouseY);
@@ -219,8 +233,8 @@ void ondaEspacial(float x, float y, float t, float[] outScale, PVector outOffset
 }
 
 PVector flowWave(float x, float y, float t) {
-  float cx = x - width/2;
-  float cy = y - height/2;
+  float cx = x - focal.x;
+  float cy = y - focal.y;
   float r = sqrt(cx*cx + cy*cy);
   float ang = atan2(cy, cx);
   float speedMod = 1.0 + compositionMode * 0.12;
@@ -367,13 +381,22 @@ void draw() {
       textSize(max(6, ts));
       textAlign(CENTER, CENTER);
 
-      fill(0, 8);
+      // Viñeta de margen: desvanece la tinta cerca del borde para que la
+      // grilla binaria respete el mismo encuadre que la grilla cinética KAL
+      // (que ya reserva BORDER_WIDTH), en vez de ir a sangre completa.
+      float marginFade =
+        min(smoothstep(0, BORDER_WIDTH * 1.4, cx),
+        min(smoothstep(0, BORDER_WIDTH * 1.4, width - cx),
+        min(smoothstep(0, BORDER_WIDTH * 1.4, cy),
+            smoothstep(0, BORDER_WIDTH * 1.4, height - cy))));
+
+      fill(0, 8 * marginFade);
       text(bit, -0.5, 0);
       text(bit,  0.5, 0);
       text(bit,  0, -0.5);
       text(bit,  0,  0.5);
 
-      fill(ink);
+      fill(ink, 100 * marginFade);
       text(bit, 0, 0);
       popMatrix();
     }
@@ -569,7 +592,7 @@ void buildForms() {
     fRot[i] = random(TWO_PI);
     fTh[i]  = random(0.03, 0.05);
     fK[i]   = random(5, 10);
-    fCol[i] = HACC[(int)random(HACC.length)];
+    fCol[i] = accentPal[(int)random(accentPal.length)];
   }
 }
 
@@ -697,6 +720,18 @@ void applyPatternPalette() {
   PALETTE = unifiedPalette.clone();
 }
 
+void buildAccentPalette() {
+  // Un único acento "chispa" por mutación (no uno distinto por forma o por
+  // glifo), más el propio 'pal' de la mutación. Así toda la pieza — formas
+  // Hilma, glifos CSym — respira el mismo acorde cromático y el contraste
+  // se siente deliberado en vez de ruido de paletas ajenas mezcladas.
+  color spark = HACC[(int)random(HACC.length)];
+  accentPal = new color[pal.length + 2];
+  for (int i = 0; i < pal.length; i++) accentPal[i] = pal[i];
+  accentPal[pal.length] = spark;
+  accentPal[pal.length + 1] = spark;
+}
+
 color paletteColor(int index) {
   return unifiedPalette[((index % unifiedPalette.length) + unifiedPalette.length) % unifiedPalette.length];
 }
@@ -716,6 +751,18 @@ void composeAPEX() {
   applyPatternPalette();
   palIdx = (int)random(palettes.length);
   pal = palettes[palIdx].clone();
+  buildAccentPalette();
+
+  // Punto focal áureo: uno de los 4 cruces de proporción áurea (~0.382 /
+  // ~0.618 del lienzo) en vez del centro exacto. Ancla todo el sistema
+  // radial — ondas, órbitas, jerarquía — en un punto de fuerza asimétrico.
+  final float GR = 0.382;
+  focal.x = width  * (random(1) < 0.5 ? GR : 1 - GR);
+  focal.y = height * (random(1) < 0.5 ? GR : 1 - GR);
+  focalMaxDist = max(
+    max(dist(focal.x, focal.y, 0, 0), dist(focal.x, focal.y, width, 0)),
+    max(dist(focal.x, focal.y, 0, height), dist(focal.x, focal.y, width, height))
+  );
 
   objs.clear();
   mShapes.clear();
@@ -748,8 +795,8 @@ void composeAPEX() {
         float tVal = (i + j + 1.0) / (cellCount * 1.5);
         float angle = TWO_PI * tVal * 1.618 + masterTime * 0.15;
         float radius = width * 0.3 * tVal;
-        float x = width/2 + cos(angle) * radius;
-        float y = height/2 + sin(angle) * radius;
+        float x = focal.x + cos(angle) * radius;
+        float y = focal.y + sin(angle) * radius;
         motions.add(new Motion(x, y, max(20, 44 * random(0.8, 1.2)), pal[0], pal[1], (i+j)%13, ((i+j)%2==0)?1:-1));
       }
     }
@@ -759,14 +806,14 @@ void composeAPEX() {
   for (int i = 0; i < vibrantCount; i++) {
     float angle = TWO_PI / vibrantCount * i;
     float radius = random(width * 0.15, width * 0.32);
-    vibrantShapes.add(new VibrantShape(width/2 + cos(angle)*radius, height/2 + sin(angle)*radius, random(28, 50)));
+    vibrantShapes.add(new VibrantShape(focal.x + cos(angle)*radius, focal.y + sin(angle)*radius, random(28, 50)));
   }
 
   int okazzFlowerCount = int(3 * d);
   for (int i = 0; i < okazzFlowerCount; i++) {
     float angle = random(TWO_PI);
     float radius = random(width * 0.16, width * 0.3);
-    okazzFlowers.add(new OkazzFlower(width/2 + cos(angle)*radius, height/2 + sin(angle)*radius, random(22, 45)));
+    okazzFlowers.add(new OkazzFlower(focal.x + cos(angle)*radius, focal.y + sin(angle)*radius, random(22, 45)));
   }
 
   int trailCount = int(2 * d);
@@ -778,20 +825,25 @@ void composeAPEX() {
   for (int i = 0; i < geoCount; i++) {
     float angle = random(TWO_PI);
     float radius = random(width * 0.15, width * 0.35);
-    complexGeo.add(new ComplexGeometry(width/2 + cos(angle)*radius, height/2 + sin(angle)*radius, random(32, 60), i%3));
+    complexGeo.add(new ComplexGeometry(focal.x + cos(angle)*radius, focal.y + sin(angle)*radius, random(32, 60), i%3));
   }
+
+  // Ancla focal: una única pieza a mayor escala, exactamente en el punto
+  // focal. Le da a la composición un centro de gravedad claro en vez de
+  // una textura uniforme sin jerarquía.
+  complexGeo.add(new ComplexGeometry(focal.x, focal.y, width * 0.14, 2));
 
   int orbitCount = int(2 * d);
   for (int i = 0; i < orbitCount; i++) {
     float angle = TWO_PI / orbitCount * i;
-    orbiters.add(new OrbitingElement(width/2 + cos(angle)*width*0.23, height/2 + sin(angle)*width*0.23, random(28, 44)));
+    orbiters.add(new OrbitingElement(focal.x + cos(angle)*width*0.23, focal.y + sin(angle)*width*0.23, random(28, 44)));
   }
 
   int flowerCount = int(3 * d);
   for (int i = 0; i < flowerCount; i++) {
     float r = random(width * 0.2);
     float a = random(TWO_PI);
-    flowers.add(new Flower(width/2 + cos(a)*r, height/2 + sin(a)*r, random(14, 22), int(random(6, 9))));
+    flowers.add(new Flower(focal.x + cos(a)*r, focal.y + sin(a)*r, random(14, 22), int(random(6, 9))));
   }
 
   int connectorCount = int(3 * d);
@@ -1432,11 +1484,11 @@ class CSym {
   float x,y,an,rs,pu,ps,sz,vx,vy,nT; int md; char sy; int gT; color c; float psp;
   CSym(float x,float y,char sy){this.x=x;this.y=y;md=0;this.sy=sy;
     an=random(TWO_PI);rs=random(-0.02,0.02);pu=random(TWO_PI);ps=random(0.015,0.04);
-    c=(sy=='0'||sy=='1')?coreColors[int(random(coreColors.length))]:color(0);sz=(sy=='0'||sy=='1')?random(10,14):random(12,16);
+    c=(sy=='0'||sy=='1')?accentPal[int(random(accentPal.length))]:color(0);sz=(sy=='0'||sy=='1')?random(10,14):random(12,16);
     vx=random(-0.4,0.4);vy=random(-0.4,0.4);nT=random(1000);psp=random(0.7,1.1);}
   CSym(float x,float y,int gT){this.x=x;this.y=y;md=1;this.gT=gT;
     an=random(TWO_PI);rs=random(-0.025,0.025);pu=random(TWO_PI);ps=random(0.015,0.04);
-    c=vibrantPalette[int(random(vibrantPalette.length))];sz=random(12,20);vx=random(-0.7,0.7);vy=random(-0.7,0.7);nT=random(1000);psp=random(0.75,1.1);}
+    c=accentPal[int(random(accentPal.length))];sz=random(12,20);vx=random(-0.7,0.7);vy=random(-0.7,0.7);nT=random(1000);psp=random(0.75,1.1);}
   void run(){
     float[] scaleArr = new float[1]; PVector offset = new PVector();
     ondaEspacial(x, y, masterTime, scaleArr, offset);
