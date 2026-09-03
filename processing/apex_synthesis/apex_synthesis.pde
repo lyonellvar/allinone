@@ -9,9 +9,17 @@
  *   en el centro exacto), con una única pieza ancla de mayor escala en ese
  *   punto y un margen consistente en todas las capas — asimetría deliberada
  *   en vez de simetría radial tipo mandala.
- * - Paleta Coherente: los acentos (formas Hilma, glifos) se derivan de la
- *   paleta armónica activa más un único acento "chispa" por mutación, en
- *   vez de mezclar paletas ajenas sin relación entre sí.
+ * - Motor de Color Armónico: un solo acorde por mutación (monocromático,
+ *   análogo, complementario, complementario dividido o triádico) tiñe TODA
+ *   la obra — retícula tipográfica, bloques cinéticos, formas Hilma,
+ *   glifos — con reparto tonal real (tinta/papel/cuerpo, regla 60-30-10),
+ *   en vez de bancos de paletas fijas y ajenas conviviendo sin relación.
+ * - Restraint Curatorial: cada mutación elige 2-3 familias decorativas
+ *   protagonistas y atenúa el resto (buildEmphasis), en vez de instanciar
+ *   las ~9 familias siempre a la misma densidad pareja.
+ * - Distribución Blue-Noise: las familias que muestrean ángulo al azar
+ *   (spreadPoint) se ubican por rechazo contra lo ya ocupado esta
+ *   mutación, evitando el amontonamiento típico del random uniforme.
  * - Controles:
  * [1 / Q] : Nueva mutación armónica perfecta
  * [2]     : Ciclar paletas maestras de color
@@ -29,21 +37,23 @@
 
 import java.util.*;
 
-// ==================== PALETAS MAESTRAS UNIFICADAS ====================
+// ==================== MOTOR DE COLOR ARMÓNICO ====================
+// Toda la obra —grilla tipográfica, formas Hilma, glifos, bloques
+// cinéticos— se tiñe a partir de UN solo acorde cromático por mutación:
+// un hue base más un esquema de teoría del color clásica (monocromático,
+// análogo, complementario, complementario dividido o triádico), generado
+// en applyPatternPalette(). unifiedPalette, pairPalette y pal son las tres
+// "vistas" de ese mismo acorde que consume el resto del sketch; ninguna
+// de las tres se elige de un banco de paletas ajeno entre sí.
 color[] PALETTE;
 color[] unifiedPalette;
+float[] schemeHueDeg; // hues ancla del acorde activo (ver applyPatternPalette)
 
-color[][] palettes = {
-  {#E12A2A, #F0871D, #2E3F93, #E1ECF4, #882585, #de5d5d, #289D4D},
-  {#044389, #fcff4b, #ffad05, #fdfffa, #5995ed, #4ecdc4, #F30100, #70d6ff, #ff70a6},
-  {#de183c, #ffd35c, #fd4a8e, #08a9e5, #7209b7, #f0f0f0, #f5822a},
-  {#e4572e, #17bebb, #ffc914, #76b041, #001163, #05569b, #5594d0, #fffef4, #b00000},
-  {#3772FF, #DF2935, #FDCA40, #080708, #E6E8E6, #FF006E, #06D6A0},
-  {#F71735, #FF9F1C, #2EC4B6, #FDFFFC, #011627, #8338EC, #76FF03},
-  {#E63946, #F1FAEE, #A8DADC, #457B9D, #1D3557, #FF006E, #FFBE0B}
-};
-
-color[][] PAIRS = new color[][]{
+// Pares tinta/fondo para la retícula binaria (el 0/1 de cada celda). Los
+// valores de aquí abajo son solo el default de arranque antes de la
+// primera composeAPEX(); applyPatternPalette() los reemplaza por pares
+// derivados de schemeHueDeg en cada mutación.
+color[][] pairPalette = new color[][]{
   { rgb(0, 214, 198), rgb(255, 42, 161) },
   { rgb(43, 93, 255), rgb(255, 52, 90) },
   { rgb(0, 188, 255), rgb(255, 210, 0) },
@@ -54,8 +64,8 @@ color[][] PAIRS = new color[][]{
 
 // Reserva de "chispas" de acento: un único color de este set se elige UNA
 // vez por mutación (ver buildAccentPalette) y se repite en toda la pieza,
-// en vez de usarse disperso al azar — así el acento nunca choca con la
-// paleta armónica activa.
+// en vez de usarse disperso al azar — un solo punto de disonancia
+// controlada, deliberado, en vez de ruido de acentos sin relación.
 color[] HACC = new color[]{
   rgb(46, 63, 147), rgb(255, 201, 20), rgb(225, 42, 42),
   rgb(40, 157, 77), rgb(103, 58, 183), rgb(255, 182, 193),
@@ -69,8 +79,19 @@ color[] HACC = new color[]{
 // composeAPEX().
 color[] accentPal = HACC.clone();
 
-color[] pal;
-int palIdx = 0;
+// Acentos sólidos (bloques M01–M08, MShape, DElem, Motion): 8 tonos
+// derivados del mismo acorde, ordenados de claro a oscuro. El valor de
+// aquí abajo es solo el default de arranque.
+color[] pal = HACC.clone();
+
+// Peso curatorial por mutación de cada familia decorativa secundaria
+// (vibrantShapes, okazzFlowers, complexGeo, orbiters, flowers, connectors,
+// binaryRain, cSyms, okazzTrails). En vez de instanciar las ~9 familias
+// siempre a la misma densidad relativa —que lee como "maximalismo
+// parejo"—, cada mutación elige 2-3 protagonistas y atenúa el resto, como
+// haría un diseñador al decidir qué elemento lidera una composición.
+float[] sysEmphasis = new float[9];
+
 final color BG = #FFFFFF;
 
 // ==================== ARSENAL COMPLETO DE LISTAS ====================
@@ -90,6 +111,7 @@ ArrayList<OkazzFlower> okazzFlowers;
 ArrayList<OkazzTrailShape> okazzTrails;
 ArrayList<TextGhostTrail> textGhostTrails;
 ArrayList<CSym> cSyms;
+ArrayList<PVector> occupied; // puntos ya ocupados esta mutación (ver spreadPoint)
 
 PImage noiseFilter;
 PGraphics grain;
@@ -274,6 +296,7 @@ void setup() {
   okazzTrails = new ArrayList<OkazzTrailShape>();
   textGhostTrails = new ArrayList<TextGhostTrail>();
   cSyms = new ArrayList<CSym>();
+  occupied = new ArrayList<PVector>();
 
   recomputeGrid();
 
@@ -324,8 +347,8 @@ void draw() {
       float bias = bBias[bi][bj];
       int   palI = bPal[bi][bj];
 
-      color c0 = PAIRS[palI][0];
-      color c1 = PAIRS[palI][1];
+      color c0 = pairPalette[palI][0];
+      color c1 = pairPalette[palI][1];
 
       float ca = bCosAng[bi][bj], sa = bSinAng[bi][bj];
       float u = (cx*ca + cy*sa) * freq + bP1[bi][bj];
@@ -603,7 +626,7 @@ void buildBlocks() {
       bAng[i][j]  = random(-PI, PI);
       bFreq[i][j] = random(0.016, 0.032);
       bBias[i][j] = random(-0.35, 0.35);
-      bPal[i][j]  = (int)random(PAIRS.length);
+      bPal[i][j]  = (int)random(pairPalette.length);
       bP1[i][j]   = random(1000);
       bP2[i][j]   = random(1000);
       // bAng no cambia entre frames: cacheamos su seno/coseno una sola vez
@@ -705,19 +728,104 @@ void buildDE() {
   }
 }
 
+// Elige un índice de hue 0..n-1 con un reparto 60/25/10/5 (dominante /
+// secundario / terciario / cuarto) en vez de uniforme — el "60-30-10" que
+// usa cualquier colorista para que un esquema de varios hues no se sienta
+// repartido en partes iguales, sino con una voz dominante clara.
+int pickHueIdx(Random r, int n) {
+  if (n <= 1) return 0;
+  float[] w = (n == 2) ? new float[]{0.65, 0.35}
+            : (n == 3) ? new float[]{0.55, 0.28, 0.17}
+                       : new float[]{0.5, 0.24, 0.16, 0.10};
+  float roll = r.nextFloat();
+  float acc = 0;
+  for (int i = 0; i < min(n, w.length); i++) {
+    acc += w[i];
+    if (roll <= acc) return i;
+  }
+  return min(n, w.length) - 1;
+}
+
 void applyPatternPalette() {
   long colorSeed = (long)seedValue * 15485863L + patternIndex * 73856093L + compositionMode * 19349663L;
   Random colorRand = new Random(colorSeed);
+
+  // 1. El acorde: un hue base y un esquema de teoría del color clásica.
+  float h0 = colorRand.nextFloat() * 360.0;
+  int scheme = colorRand.nextInt(5);
+  float[] offsets;
+  switch (scheme) {
+    case 0:  offsets = new float[]{0};             break; // monocromático
+    case 1:  offsets = new float[]{0, -30, 30};    break; // análogo
+    case 2:  offsets = new float[]{0, 180};        break; // complementario
+    case 3:  offsets = new float[]{0, 150, 210};   break; // complementario dividido
+    default: offsets = new float[]{0, 120, 240};   break; // triádico
+  }
+  schemeHueDeg = new float[offsets.length];
+  for (int i = 0; i < offsets.length; i++) schemeHueDeg[i] = (h0 + offsets[i] + 360) % 360;
+
+  // 2. unifiedPalette: 256 tonos con estructura tonal real (tinta / papel /
+  // cuerpo) en vez de saturación y brillo uniformemente aleatorios — y,
+  // clave, las tres zonas comparten el mismo hue del acorde en vez de que
+  // solo el "cuerpo" lo respete.
   unifiedPalette = new color[256];
   for (int i = 0; i < 256; i++) {
-    float h = colorRand.nextFloat() * 360.0;
-    float s = colorRand.nextFloat() * 35 + 60;
-    float b = colorRand.nextFloat() * 35 + 60;
-    if (i % 5 == 0) { s = colorRand.nextFloat() * 12; b = colorRand.nextFloat() * 12 + 18; }
-    else if (i % 9 == 0) { s = 0; b = colorRand.nextFloat() * 8 + 92; }
+    float h = (schemeHueDeg[pickHueIdx(colorRand, schemeHueDeg.length)] + (colorRand.nextFloat() - 0.5) * 14 + 360) % 360;
+    float roleRoll = colorRand.nextFloat();
+    float s, b;
+    if (roleRoll < 0.08) {                                 // tinta: oscura y saturada, ~8%
+      s = 55 + colorRand.nextFloat() * 30;
+      b = 14 + colorRand.nextFloat() * 16;
+    } else if (roleRoll < 0.18) {                          // papel: casi neutra y clara, ~10%
+      s = colorRand.nextFloat() * 10;
+      b = 90 + colorRand.nextFloat() * 8;
+    } else {                                                // cuerpo: el grueso tonal, ~82%
+      s = 45 + colorRand.nextFloat() * 40;
+      b = 45 + colorRand.nextFloat() * 40;
+    }
     unifiedPalette[i] = color(h, s, b);
   }
   PALETTE = unifiedPalette.clone();
+
+  // 3. pairPalette: los pares tinta/fondo de la retícula binaria, que
+  // domina la mayoría de píxeles visibles de la pieza — deben venir del
+  // mismo acorde o toda la obra se ve partida en dos paletas distintas.
+  pairPalette = new color[6][2];
+  for (int i = 0; i < pairPalette.length; i++) {
+    float hueA = schemeHueDeg[pickHueIdx(colorRand, schemeHueDeg.length)];
+    float hueB = schemeHueDeg[pickHueIdx(colorRand, schemeHueDeg.length)];
+    if (colorRand.nextFloat() < 0.55) {
+      pairPalette[i][0] = color(hueA, 18 + colorRand.nextFloat() * 18, 88 + colorRand.nextFloat() * 8);
+      pairPalette[i][1] = color(hueB, 55 + colorRand.nextFloat() * 30, 16 + colorRand.nextFloat() * 18);
+    } else {
+      pairPalette[i][0] = color(hueA, 55 + colorRand.nextFloat() * 30, 45 + colorRand.nextFloat() * 30);
+      pairPalette[i][1] = color(hueB, 55 + colorRand.nextFloat() * 30, 45 + colorRand.nextFloat() * 30);
+    }
+  }
+
+  // 4. pal: 8 acentos sólidos para los bloques cinéticos MB/M01-M08,
+  // MShape, DElem y Motion — un degradado claro→oscuro sobre el mismo
+  // acorde, para que esa familia (visualmente la más grande y sólida) no
+  // compita con un banco de colores completamente ajeno.
+  pal = new color[8];
+  for (int i = 0; i < pal.length; i++) {
+    float t = i / float(pal.length - 1);
+    float hue = schemeHueDeg[pickHueIdx(colorRand, schemeHueDeg.length)];
+    float s = 58 + colorRand.nextFloat() * 32;
+    float b = 40 + (1 - t) * 45 + colorRand.nextFloat() * 8;
+    pal[i] = color(hue, s, b);
+  }
+}
+
+void buildEmphasis() {
+  // 2-3 familias "protagonistas" por mutación (boost fuerte), el resto
+  // atenuado — restraint curatorial en vez de maximalismo parejo cada vez.
+  for (int i = 0; i < sysEmphasis.length; i++) sysEmphasis[i] = 0.45 + random(0.25);
+  int leads = 2 + (int)random(2);
+  for (int k = 0; k < leads; k++) {
+    int idx = (int)random(sysEmphasis.length);
+    sysEmphasis[idx] = 1.5 + random(0.6);
+  }
 }
 
 void buildAccentPalette() {
@@ -749,9 +857,8 @@ void composeAPEX() {
   noiseSeed(activeSeed);
 
   applyPatternPalette();
-  palIdx = (int)random(palettes.length);
-  pal = palettes[palIdx].clone();
   buildAccentPalette();
+  buildEmphasis();
 
   // Punto focal áureo: uno de los 4 cruces de proporción áurea (~0.382 /
   // ~0.618 del lienzo) en vez del centro exacto. Ancla todo el sistema
@@ -780,6 +887,7 @@ void composeAPEX() {
   okazzTrails.clear();
   textGhostTrails.clear();
   cSyms.clear();
+  occupied.clear();
 
   buildMG();
   buildMS();
@@ -798,65 +906,78 @@ void composeAPEX() {
         float x = focal.x + cos(angle) * radius;
         float y = focal.y + sin(angle) * radius;
         motions.add(new Motion(x, y, max(20, 44 * random(0.8, 1.2)), pal[0], pal[1], (i+j)%13, ((i+j)%2==0)?1:-1));
+        occupied.add(new PVector(x, y));
       }
     }
   }
 
-  int vibrantCount = int(4 * d);
+  // vibrantShapes reparte su ángulo de forma pareja (2π/n) — ya está bien
+  // distribuido por construcción; solo se registra para que las familias
+  // que sí muestrean al azar (abajo) sepan evitarlo.
+  int vibrantCount = round(4 * d * sysEmphasis[0]);
   for (int i = 0; i < vibrantCount; i++) {
     float angle = TWO_PI / vibrantCount * i;
     float radius = random(width * 0.15, width * 0.32);
-    vibrantShapes.add(new VibrantShape(focal.x + cos(angle)*radius, focal.y + sin(angle)*radius, random(28, 50)));
+    float vx = focal.x + cos(angle)*radius, vy = focal.y + sin(angle)*radius;
+    vibrantShapes.add(new VibrantShape(vx, vy, random(28, 50)));
+    occupied.add(new PVector(vx, vy));
   }
 
-  int okazzFlowerCount = int(3 * d);
+  // okazzFlowers sí usa ángulo puramente al azar — propenso a amontonarse
+  // por pura probabilidad, así que se ubica con spreadPoint.
+  int okazzFlowerCount = round(3 * d * sysEmphasis[1]);
   for (int i = 0; i < okazzFlowerCount; i++) {
-    float angle = random(TWO_PI);
-    float radius = random(width * 0.16, width * 0.3);
-    okazzFlowers.add(new OkazzFlower(focal.x + cos(angle)*radius, focal.y + sin(angle)*radius, random(22, 45)));
+    PVector p = spreadPoint(focal.x, focal.y, width * 0.16, width * 0.3, 40);
+    okazzFlowers.add(new OkazzFlower(p.x, p.y, random(22, 45)));
   }
 
-  int trailCount = int(2 * d);
+  int trailCount = round(2 * d * sysEmphasis[8]);
   for (int i = 0; i < trailCount; i++) {
     okazzTrails.add(new OkazzTrailShape(random(width * 0.3, width * 0.7), random(height * 0.3, height * 0.7), random(28, 50), paletteColor(i * 31)));
   }
 
-  int geoCount = int(3 * d);
+  int geoCount = round(3 * d * sysEmphasis[2]);
   for (int i = 0; i < geoCount; i++) {
-    float angle = random(TWO_PI);
-    float radius = random(width * 0.15, width * 0.35);
-    complexGeo.add(new ComplexGeometry(focal.x + cos(angle)*radius, focal.y + sin(angle)*radius, random(32, 60), i%3));
+    PVector p = spreadPoint(focal.x, focal.y, width * 0.15, width * 0.35, 48);
+    complexGeo.add(new ComplexGeometry(p.x, p.y, random(32, 60), i%3));
   }
 
   // Ancla focal: una única pieza a mayor escala, exactamente en el punto
   // focal. Le da a la composición un centro de gravedad claro en vez de
   // una textura uniforme sin jerarquía.
   complexGeo.add(new ComplexGeometry(focal.x, focal.y, width * 0.14, 2));
+  occupied.add(new PVector(focal.x, focal.y));
 
-  int orbitCount = int(2 * d);
+  // orbiters reparte su ángulo de forma pareja (2π/n) — ya está bien
+  // distribuido por construcción; solo se registra para las que siguen.
+  int orbitCount = round(2 * d * sysEmphasis[3]);
   for (int i = 0; i < orbitCount; i++) {
     float angle = TWO_PI / orbitCount * i;
-    orbiters.add(new OrbitingElement(focal.x + cos(angle)*width*0.23, focal.y + sin(angle)*width*0.23, random(28, 44)));
+    float ox = focal.x + cos(angle)*width*0.23, oy = focal.y + sin(angle)*width*0.23;
+    orbiters.add(new OrbitingElement(ox, oy, random(28, 44)));
+    occupied.add(new PVector(ox, oy));
   }
 
-  int flowerCount = int(3 * d);
+  // flowers usa ángulo puramente al azar — spreadPoint evita que se
+  // amontonen entre sí o sobre lo que ya ocupan las familias anteriores.
+  int flowerCount = round(3 * d * sysEmphasis[4]);
   for (int i = 0; i < flowerCount; i++) {
-    float r = random(width * 0.2);
-    float a = random(TWO_PI);
-    flowers.add(new Flower(focal.x + cos(a)*r, focal.y + sin(a)*r, random(14, 22), int(random(6, 9))));
+    PVector p = spreadPoint(focal.x, focal.y, 0, width * 0.2, 22);
+    flowers.add(new Flower(p.x, p.y, random(14, 22), int(random(6, 9))));
   }
 
-  int connectorCount = int(3 * d);
+  int connectorCount = round(3 * d * sysEmphasis[5]);
   for (int i = 0; i < connectorCount; i++) {
     connectors.add(new Connector(random(width * 0.25, width * 0.75), random(height * 0.25, height * 0.75), random(10, 22)));
   }
 
-  int rainCount = int(2 * d);
+  int rainCount = round(2 * d * sysEmphasis[6]);
   for (int i = 0; i < rainCount; i++) {
     binaryRains.add(new BinaryRain(width * 0.35 + (width * 0.3) * (i / max(1.0, (float)(rainCount - 1)))));
   }
 
-  for (int i = 0; i < int(5 * d); i++) {
+  int cSymCount = round(5 * d * sysEmphasis[7]);
+  for (int i = 0; i < cSymCount; i++) {
     cSyms.add(new CSym(random(width*0.25, width*0.75), random(height*0.25, height*0.75), random(1)<0.65 ? (random(1)<0.5?'0':'1') : '#'));
   }
 }
@@ -1783,6 +1904,32 @@ void wrapXY(PVector p, float margin) {
   if (p.y < b) p.y = height - b; if (p.y > height - b) p.y = b;
 }
 
+// Muestreo tipo "blue-noise" por rechazo: en vez de un ángulo puramente
+// al azar (que amontona puntos por pura probabilidad — el problema clásico
+// del random uniforme en composición), prueba varios candidatos en el
+// anillo [rMin,rMax] alrededor de (cx,cy) y se queda con el más alejado de
+// lo ya ocupado esta mutación. Se degrada con elegancia: si ningún
+// candidato cumple minDist, devuelve el mejor intento en vez de fallar.
+PVector spreadPoint(float cx, float cy, float rMin, float rMax, float minDist) {
+  PVector best = null;
+  float bestNearest = -1;
+  for (int attempt = 0; attempt < 14; attempt++) {
+    float a = random(TWO_PI);
+    float r = random(rMin, rMax);
+    float px = cx + cos(a) * r;
+    float py = cy + sin(a) * r;
+    float nearest = Float.MAX_VALUE;
+    for (PVector o : occupied) nearest = min(nearest, dist(px, py, o.x, o.y));
+    if (occupied.isEmpty() || nearest >= minDist) {
+      best = new PVector(px, py);
+      break;
+    }
+    if (nearest > bestNearest) { bestNearest = nearest; best = new PVector(px, py); }
+  }
+  occupied.add(best);
+  return best;
+}
+
 // ==================== INPUT / CONTROLES ====================
 void keyPressed() {
   if (key == '1' || key == 'q' || key == 'Q') {
@@ -1793,7 +1940,7 @@ void keyPressed() {
     println(">>> [SYNTHESIS MUTATION] Seed: " + SEED);
   }
   else if (key == '2') {
-    for (int i = 0; i < BLOCKS; i++) for (int j = 0; j < BLOCKS; j++) bPal[i][j] = (bPal[i][j] + 1) % PAIRS.length;
+    for (int i = 0; i < BLOCKS; i++) for (int j = 0; j < BLOCKS; j++) bPal[i][j] = (bPal[i][j] + 1) % pairPalette.length;
   }
   else if (key == 'r' || key == 'R') {
     randomSeed(SEED * 3 + 99);
